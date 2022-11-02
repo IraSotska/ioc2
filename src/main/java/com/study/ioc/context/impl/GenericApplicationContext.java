@@ -3,12 +3,16 @@ package com.study.ioc.context.impl;
 import com.study.ioc.context.ApplicationContext;
 import com.study.ioc.entity.Bean;
 import com.study.ioc.entity.BeanDefinition;
+import com.study.ioc.exception.BeanInstantiationException;
+import com.study.ioc.exception.NoSuchBeanDefinitionException;
+import com.study.ioc.exception.NoUniqueBeanOfTypeException;
 import com.study.ioc.reader.BeanDefinitionReader;
 import com.study.ioc.reader.sax.XmlBeanDefinitionReader;
 
+import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
+import java.util.stream.Collectors;
 
 public class GenericApplicationContext implements ApplicationContext {
 
@@ -31,43 +35,133 @@ public class GenericApplicationContext implements ApplicationContext {
 
     @Override
     public Object getBean(String beanId) {
-        return null;
+        List<Bean> beansById = beans.values().stream()
+                .filter(bean -> Objects.equals(bean.getId(), beanId))
+                .collect(Collectors.toList());
+        checkIfOneBeanExist(beansById, null, beanId);
+
+        return beansById.get(0).getValue();
     }
 
     @Override
+    @SuppressWarnings("unchecked")
     public <T> T getBean(Class<T> clazz) {
-        return null;
+        List<Bean> beansByClass = beans.values().stream()
+                .filter(bean -> Objects.equals(bean.getValue().getClass(), clazz))
+                .collect(Collectors.toList());
+        checkIfOneBeanExist(beansByClass, clazz, null);
+
+        return (T) beansByClass.get(0).getValue();
     }
 
     @Override
+    @SuppressWarnings("unchecked")
     public <T> T getBean(String id, Class<T> clazz) {
-        return null;
+        List<Bean> resultBeans = beans.values().stream()
+                .filter(bean -> Objects.equals(bean.getValue().getClass(), clazz) && Objects.equals(bean.getId(), id))
+                .collect(Collectors.toList());
+        checkIfOneBeanExist(resultBeans, clazz, id);
+
+        return (T) resultBeans.get(0).getValue();
     }
 
     @Override
     public List<String> getBeanNames() {
-        return null;
+        return new ArrayList<>(beans.keySet());
     }
 
     Map<String, Bean> createBeans(Map<String, BeanDefinition> beanDefinitionMap) {
-        return null;
+        Map<String, Bean> result = new HashMap<>();
+        beanDefinitionMap.forEach((key, value) -> {
+            try {
+                Constructor<?> constructor = Class.forName(value.getClassName()).getConstructor();
+                result.put(key, new Bean(value.getId(), constructor.newInstance()));
+            } catch (Exception e) {
+                throw new BeanInstantiationException(e.getMessage(), e);
+            }
+        });
+        return result;
     }
 
     void injectValueDependencies(Map<String, BeanDefinition> beanDefinitions, Map<String, Bean> beans) {
+        beanDefinitions.values().forEach(beanDefinition -> {
+            beanDefinition.getValueDependencies().forEach((fieldName, value) -> {
+                Object beanForInject = beans.get(beanDefinition.getId()).getValue();
+                try {
+                    injectValue(beanForInject, getSetter(beanForInject, fieldName), value);
+                } catch (Exception e) {
+                    throw new BeanInstantiationException("Can't create bean with bean definition: " + beanDefinition, e);
+                }
+            });
+        });
     }
 
     void injectRefDependencies(Map<String, BeanDefinition> beanDefinitions, Map<String, Bean> beans) {
+        beanDefinitions.forEach((beanDefKey, value) -> value.getRefDependencies().forEach((key, injectedBeanName) -> {
+            Object beanForInject = beans.get(beanDefKey).getValue();
+            Method setter = getSetter(beanForInject, key);
 
+            try {
+                setter.invoke(beanForInject, beans.get(injectedBeanName).getValue());
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        }));
+    }
+
+    void injectValue(Object object, Method classMethod, String propertyValue) throws ReflectiveOperationException {
+        classMethod.invoke(object, castValue(propertyValue, classMethod.getParameterTypes()[0]));
+    }
+
+
+    void setBeans(Map<String, Bean> beans) {
+        this.beans = beans;
     }
 
     private String getSetterName(String fieldName) {
         return "set" + fieldName.substring(0, 1).toUpperCase() + fieldName.substring(1);
     }
 
-    void injectValue(Object object, Method classMethod, String propertyValue) throws ReflectiveOperationException {
+    private void checkIfOneBeanExist(List<Bean> beans, Class<?> clazz, String id) {
+        if (beans.isEmpty()) {
+            throw new NoSuchBeanDefinitionException(id, clazz.getCanonicalName());
+        }
+        if (beans.size() > 1) {
+            throw new NoUniqueBeanOfTypeException("Found " + beans.size() + " beans of " + clazz + " class.");
+        }
     }
 
-    void setBeans(Map<String, Bean> beans) {
-        this.beans = beans;
+    private Object castValue(String propertyValue, Class<?> clazz) {
+        String type = clazz.getCanonicalName();
+
+        if (int.class.getCanonicalName().equals(type) || Integer.class.getCanonicalName().equals(type)) {
+            return Integer.valueOf(propertyValue);
+
+        } else if (byte.class.getCanonicalName().equals(type) || Byte.class.getCanonicalName().equals(type)) {
+            return Byte.valueOf(propertyValue);
+
+        } else if (short.class.getCanonicalName().equals(type) || Short.class.getCanonicalName().equals(type)) {
+            return Short.valueOf(propertyValue);
+
+        } else if (long.class.getCanonicalName().equals(type) || Long.class.getCanonicalName().equals(type)) {
+            return Long.valueOf(propertyValue);
+
+        } else if (boolean.class.getCanonicalName().equals(type) || Boolean.class.getCanonicalName().equals(type)) {
+            return Boolean.valueOf(propertyValue);
+
+        } else {
+            return clazz.cast(propertyValue);
+        }
+    }
+
+    private Method getSetter(Object beanForInject, String fieldName) {
+        String setterName = getSetterName(fieldName);
+        Optional<Method> setter = Arrays.stream(beanForInject.getClass().getDeclaredMethods())
+                .filter(method -> method.getName().equals(setterName))
+                .findFirst();
+        if (!setter.isPresent()) {
+            throw new IllegalArgumentException("Setter for field: " + fieldName + " is not present.");
+        }
+        return setter.get();
     }
 }
