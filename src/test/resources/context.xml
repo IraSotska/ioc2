@@ -19,4 +19,5 @@
     <bean id="userServiceImap" class="com.study.entity.DefaultUserService">
         <property name="mailService" ref="mailServiceIMAP"/>
     </bean>
+    <bean id="testBeanPostProcessor" class="com.study.processor.testPostProcessor"/>
 </beans>

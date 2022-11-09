@@ -7,6 +7,8 @@ import com.study.ioc.entity.BeanDefinition;
 import com.study.ioc.exception.BeanInstantiationException;
 import com.study.ioc.exception.NoSuchBeanDefinitionException;
 import com.study.ioc.exception.NoUniqueBeanOfTypeException;
+import com.study.processor.TestBeanFactoryPostProcessor;
+import com.study.processor.TestPostProcessor;
 import org.junit.Before;
 import org.junit.Test;
 
@@ -204,5 +206,55 @@ public class GenericApplicationContextTest {
         genericApplicationContext.injectValue(mailService, setPortMethod, "465");
         int actualPort = mailService.getPort();
         assertEquals(465, actualPort);
+    }
+
+    @Test
+    public void testPostProcessBeans() {
+        Map<String, Bean> beans = Map.of("MyMailService", Bean.builder()
+                .id("MyMailService")
+                .value(new MailService())
+                .build());
+
+        Map<String, Bean> systemBeans = Map.of("TestPostProcessor", Bean.builder()
+                .id("TestPostProcessor")
+                .value(new TestPostProcessor())
+                .build());
+
+        Map<String, Bean> postProcessedBeanMap = genericApplicationContext.postProcessBeans(beans, systemBeans,
+                "postProcessBeforeInitialization");
+
+        assertEquals("MyMailService", postProcessedBeanMap.get("MyMailService").getValue());
+    }
+
+    @Test
+    public void testRunInitMethodsForBeans() {
+        Map<String, Bean> beans = Map.of("MyMailService", Bean.builder()
+                .id("MyMailService")
+                .value(MailService.builder()
+                        .port(1000)
+                        .protocol("protocol")
+                        .build())
+                .build());
+
+        genericApplicationContext.runInitMethods(beans);
+
+        assertEquals(2000, ((MailService) beans.get("MyMailService").getValue()).getPort());
+    }
+
+    @Test
+    public void testPostProcessBeanDefinitions() {
+        List<BeanDefinition> beanDefinitionList = List.of(BeanDefinition.builder()
+                .className("className")
+                .id("id")
+                .valueDependencies(Map.of())
+                .refDependencies(Map.of())
+                .build());
+
+        genericApplicationContext.postProcessBeanDefinitions(beanDefinitionList,
+                Map.of("Key", Bean.builder()
+                        .id("Key")
+                        .value(new TestBeanFactoryPostProcessor()).build()));
+
+        assertEquals("newClassName", beanDefinitionList.get(0).getClassName());
     }
 }

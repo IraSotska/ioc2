@@ -6,20 +6,23 @@ import com.study.ioc.entity.BeanDefinition;
 import com.study.ioc.exception.BeanInstantiationException;
 import com.study.ioc.exception.NoSuchBeanDefinitionException;
 import com.study.ioc.exception.NoUniqueBeanOfTypeException;
+import com.study.ioc.exception.PostProcessBeanFactoryException;
+import com.study.ioc.processor.PostConstruct;
 import com.study.ioc.reader.BeanDefinitionReader;
 import com.study.ioc.reader.sax.XmlBeanDefinitionReader;
+import lombok.NoArgsConstructor;
 
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
 import java.util.*;
-import java.util.stream.Collectors;
 
+import static java.util.stream.Collectors.toList;
+import static java.util.stream.Collectors.toMap;
+
+@NoArgsConstructor
 public class GenericApplicationContext implements ApplicationContext {
 
     private Map<String, Bean> beans;
-
-    GenericApplicationContext() {
-    }
 
     public GenericApplicationContext(String... paths) {
         this(new XmlBeanDefinitionReader(paths));
@@ -27,17 +30,89 @@ public class GenericApplicationContext implements ApplicationContext {
 
     public GenericApplicationContext(BeanDefinitionReader definitionReader) {
         Map<String, BeanDefinition> beanDefinitions = definitionReader.getBeanDefinition();
+        Map<String, Bean> allBeans = createBeans(beanDefinitions);
+
+        Map<String, Bean> beanPostProcessors = filterBeanImplementsInterface(allBeans, "BeanPostProcessor");
+        Map<String, Bean> beanDefinitionPostProcessors = filterBeanImplementsInterface(allBeans, "BeanFactoryPostProcessor");
+
+        beanPostProcessors.keySet().forEach(beanDefinitions::remove);
+        beanDefinitionPostProcessors.keySet().forEach(beanDefinitions::remove);
+
+        postProcessBeanDefinitions((List<BeanDefinition>) beanDefinitions.values(), beanDefinitionPostProcessors);
 
         beans = createBeans(beanDefinitions);
+
+        beans = postProcessBeans(beans, beanPostProcessors, "postProcessBeforeInitialization");
+        runInitMethods(beans);
+        beans = postProcessBeans(beans, beanPostProcessors, "postProcessAfterInitialization");
+
+        beanPostProcessors.keySet().forEach(beans::remove);
+        beanDefinitionPostProcessors.keySet().forEach(beans::remove);
+
         injectValueDependencies(beanDefinitions, beans);
         injectRefDependencies(beanDefinitions, beans);
+    }
+
+    void runInitMethods(Map<String, Bean> beans) {
+        beans.forEach((key, value) -> {
+            Object object = value.getValue();
+
+            Arrays.stream(object.getClass().getDeclaredMethods()).forEach(
+                    method -> {
+                        if (method.getAnnotation(PostConstruct.class) == null) {
+                            return;
+                        }
+                        try {
+                            method.setAccessible(true);
+                            method.invoke(object);
+                        } catch (Exception e) {
+                            throw new PostProcessBeanFactoryException("Exception while run post construct method on bean with id: " + key, e);
+                        }
+                    }
+            );
+        });
+    }
+
+    Map<String, Bean> postProcessBeans(Map<String, Bean> beans, Map<String, Bean> systemBeans, String methodName) {
+        return beans.entrySet().stream().map(entry -> {
+
+            Object object = entry.getValue().getValue();
+            for (Bean bean : systemBeans.values()) {
+                try {
+                    Method postProcessBeforeInitializationMethod = bean.getValue().getClass()
+                            .getDeclaredMethod(methodName, Object.class, String.class);
+
+                    object = postProcessBeforeInitializationMethod.invoke(bean.getValue(), object, entry.getKey());
+                } catch (Exception e) {
+                    throw new PostProcessBeanFactoryException("Exception while post process bean: " + entry.getKey(), e);
+                }
+            }
+            return Bean.builder()
+                    .value(object)
+                    .id(entry.getKey())
+                    .build();
+
+        }).collect(toMap(Bean::getId, bean -> bean));
+    }
+
+    void postProcessBeanDefinitions(List<BeanDefinition> beanDefinitionList, Map<String, Bean> systemBeans) {
+        systemBeans.values().forEach(entry -> {
+            Object objectForProcess = entry.getValue();
+            try {
+                Method postProcessBeanFactoryMethod = objectForProcess.getClass()
+                        .getDeclaredMethod("postProcessBeanFactory", List.class);
+                postProcessBeanFactoryMethod.invoke(objectForProcess, beanDefinitionList);
+            } catch (Exception e) {
+                throw new PostProcessBeanFactoryException("Exception while post process bean definition " + entry.getId(), e);
+            }
+        });
     }
 
     @Override
     public Object getBean(String beanId) {
         List<Bean> beansById = beans.values().stream()
                 .filter(bean -> Objects.equals(bean.getId(), beanId))
-                .collect(Collectors.toList());
+                .collect(toList());
         checkIfOneBeanExist(beansById, null, beanId);
 
         return beansById.get(0).getValue();
@@ -48,7 +123,7 @@ public class GenericApplicationContext implements ApplicationContext {
     public <T> T getBean(Class<T> clazz) {
         List<Bean> beansByClass = beans.values().stream()
                 .filter(bean -> Objects.equals(bean.getValue().getClass(), clazz))
-                .collect(Collectors.toList());
+                .collect(toList());
         checkIfOneBeanExist(beansByClass, clazz, null);
 
         return (T) beansByClass.get(0).getValue();
@@ -59,7 +134,7 @@ public class GenericApplicationContext implements ApplicationContext {
     public <T> T getBean(String id, Class<T> clazz) {
         List<Bean> resultBeans = beans.values().stream()
                 .filter(bean -> Objects.equals(bean.getValue().getClass(), clazz) && Objects.equals(bean.getId(), id))
-                .collect(Collectors.toList());
+                .collect(toList());
         checkIfOneBeanExist(resultBeans, clazz, id);
 
         return (T) resultBeans.get(0).getValue();
@@ -77,7 +152,7 @@ public class GenericApplicationContext implements ApplicationContext {
                 Constructor<?> constructor = Class.forName(value.getClassName()).getConstructor();
                 result.put(key, new Bean(value.getId(), constructor.newInstance()));
             } catch (Exception e) {
-                throw new BeanInstantiationException(e.getMessage(), e);
+                throw new BeanInstantiationException("Exception while create bean with id: " + key, e);
             }
         });
         return result;
@@ -104,7 +179,7 @@ public class GenericApplicationContext implements ApplicationContext {
             try {
                 setter.invoke(beanForInject, beans.get(injectedBeanName).getValue());
             } catch (Exception e) {
-                e.printStackTrace();
+                throw new BeanInstantiationException("Exception while inject reference dependency bean with id: " + beanDefKey, e);
             }
         }));
     }
@@ -112,7 +187,6 @@ public class GenericApplicationContext implements ApplicationContext {
     void injectValue(Object object, Method classMethod, String propertyValue) throws ReflectiveOperationException {
         classMethod.invoke(object, castValue(propertyValue, classMethod.getParameterTypes()[0]));
     }
-
 
     void setBeans(Map<String, Bean> beans) {
         this.beans = beans;
@@ -163,5 +237,12 @@ public class GenericApplicationContext implements ApplicationContext {
             throw new IllegalArgumentException("Setter for field: " + fieldName + " is not present.");
         }
         return setter.get();
+    }
+
+    private Map<String, Bean> filterBeanImplementsInterface(Map<String, Bean> beans, String interfaceName) {
+        return beans.entrySet().stream()
+                .filter(bean -> Arrays.stream(bean.getValue().getValue().getClass().getInterfaces())
+                        .anyMatch(i -> i.getCanonicalName().equals(interfaceName)))
+                .collect(toMap(Map.Entry::getKey, Map.Entry::getValue));
     }
 }
