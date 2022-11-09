@@ -9,8 +9,8 @@ import com.study.ioc.exception.NoSuchBeanDefinitionException;
 import com.study.ioc.exception.NoUniqueBeanOfTypeException;
 import com.study.processor.TestBeanFactoryPostProcessor;
 import com.study.processor.TestPostProcessor;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Method;
 import java.util.Arrays;
@@ -18,13 +18,13 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import static org.junit.Assert.*;
+import static org.junit.jupiter.api.Assertions.*;
 
 public class GenericApplicationContextTest {
 
     private GenericApplicationContext genericApplicationContext;
 
-    @Before
+    @BeforeEach
     public void before() {
         genericApplicationContext = new GenericApplicationContext();
     }
@@ -51,12 +51,15 @@ public class GenericApplicationContextTest {
     }
 
 
-    @Test(expected = BeanInstantiationException.class)
+    @Test
     public void testCreateBeansWithWrongClass() {
         Map<String, BeanDefinition> beanDefinitionMap = new HashMap<>();
         BeanDefinition errorBeanDefinition = new BeanDefinition("mailServicePOP", "com.study.entity.TestClass");
         beanDefinitionMap.put("mailServicePOP", errorBeanDefinition);
-        Map<String, Bean> beanMap = genericApplicationContext.createBeans(beanDefinitionMap);
+
+        assertThrows(BeanInstantiationException.class, () -> {
+            genericApplicationContext.createBeans(beanDefinitionMap);
+        });
     }
 
     @Test
@@ -91,13 +94,17 @@ public class GenericApplicationContextTest {
         assertEquals(beanValue2, actualBeanValue2);
     }
 
-    @Test(expected = NoUniqueBeanOfTypeException.class)
+    @Test
     public void testGetBeanByClazzNoUniqueBean() {
         Map<String, Bean> beanMap = new HashMap<>();
         beanMap.put("bean1", new Bean("bean1", new DefaultUserService()));
         beanMap.put("bean2", new Bean("bean2", new DefaultUserService()));
         genericApplicationContext.setBeans(beanMap);
-        genericApplicationContext.getBean(DefaultUserService.class);
+
+        assertThrows(NoUniqueBeanOfTypeException.class, () -> {
+            genericApplicationContext.getBean(DefaultUserService.class);
+        });
+
     }
 
     @Test
@@ -116,15 +123,16 @@ public class GenericApplicationContextTest {
         assertEquals(beanValue2, actualBeanValue2);
     }
 
-
-    @Test(expected = NoSuchBeanDefinitionException.class)
+    @Test
     public void testGetBeanByIdAndClazzNoSuchBean() {
         Map<String, Bean> beanMap = new HashMap<>();
         DefaultUserService beanValue = new DefaultUserService();
         beanMap.put("bean1", new Bean("bean1", beanValue));
         genericApplicationContext.setBeans(beanMap);
-        genericApplicationContext.getBean("bean1", MailService.class);
 
+        assertThrows(NoSuchBeanDefinitionException.class, () -> {
+            genericApplicationContext.getBean("bean1", MailService.class);
+        });
     }
 
     @Test
