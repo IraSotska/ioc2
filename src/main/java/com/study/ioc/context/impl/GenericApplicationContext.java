@@ -36,14 +36,14 @@ public class GenericApplicationContext implements ApplicationContext {
         Map<String, BeanDefinition> beanDefinitions = definitionReader.getBeanDefinition();
         Map<String, Bean> allBeans = createBeans(beanDefinitions);
 
-        Map<String, Bean> beanPostProcessors = filterBeanImplementsInterface(allBeans, "BeanPostProcessor");
-        Map<String, Bean> beanDefinitionPostProcessors = filterBeanImplementsInterface(allBeans, "BeanFactoryPostProcessor");
+        Map<String, Bean> beanPostProcessors = filterBeanImplementsInterface(allBeans, "com.study.ioc.processor.BeanPostProcessor");
+        Map<String, Bean> beanDefinitionPostProcessors = filterBeanImplementsInterface(allBeans, "com.study.ioc.processor.BeanFactoryPostProcessor");
 
         beanPostProcessors.keySet().forEach(beanDefinitions::remove);
         beanDefinitionPostProcessors.keySet().forEach(beanDefinitions::remove);
 
         log.info("Post process bean definitions.");
-        postProcessBeanDefinitions((List<BeanDefinition>) beanDefinitions.values(), beanDefinitionPostProcessors);
+        postProcessBeanDefinitions(beanDefinitions.values().stream().toList(), beanDefinitionPostProcessors);
 
         log.info("Instantiation of beans started.");
         beans = createBeans(beanDefinitions);

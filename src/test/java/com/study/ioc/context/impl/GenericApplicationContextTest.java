@@ -22,12 +22,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 public class GenericApplicationContextTest {
 
-    private GenericApplicationContext genericApplicationContext;
-
-    @BeforeEach
-    public void before() {
-        genericApplicationContext = new GenericApplicationContext();
-    }
+    private GenericApplicationContext genericApplicationContext = new GenericApplicationContext();
 
     @Test
     public void testCreateBeans() {
